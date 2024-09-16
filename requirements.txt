@@ -1,0 +1,5 @@
+streamlit
+boto3
+pandas
+s3fs
+st-files-connection
