@@ -14,9 +14,9 @@ from datetime import datetime
 from io import StringIO
 
 # Access secrets using st.secrets
-aws_access_key_id = st.secrets["aws"]["aws_access_key_id"]
-aws_secret_access_key = st.secrets["aws"]["aws_secret_access_key"]
-region_name = st.secrets["aws"]["region"]
+aws_access_key_id = st.secrets["aws_access_key_id"]
+aws_secret_access_key = st.secrets["aws_secret_access_key"]
+region_name = st.secrets["region"]
 
 # Specify the workload parameters
 workload_id = st.secrets["aws"]["aws_workload_id"]
