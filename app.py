@@ -19,11 +19,11 @@ aws_secret_access_key = st.secrets["aws_secret_access_key"]
 region_name = st.secrets["region"]
 
 # Specify the workload parameters
-workload_id = st.secrets["aws"]["aws_workload_id"]
+workload_id = st.secrets["workload_id"]
 lens_alias = 'wellarchitected'
 
 # AWS S3 Configuration
-s3_bucket = st.secrets["aws"]["aws_s3_bucket"] 
+s3_bucket = st.secrets["s3_bucket"] 
 
 # Initialize AWS clients
 s3_client = boto3.client(
