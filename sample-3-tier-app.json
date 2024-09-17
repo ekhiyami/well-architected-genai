@@ -1,0 +1,615 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Enhanced AWS CloudFormation template to create a highly secure, highly available, scalable LAMP stack with improved security, reliability, and cost optimization configurations.",
+  "Parameters": {
+    "VpcId": {
+      "Type": "AWS::EC2::VPC::Id",
+      "Description": "VpcId of your existing Virtual Private Cloud (VPC)",
+      "Default": "vpc-0d5777d3xxxxxxx74",
+      "ConstraintDescription": "Must be the VPC Id of an existing Virtual Private Cloud."
+    },
+    "DBName": {
+      "Default": "myDatabase",
+      "Description": "MySQL database name",
+      "Type": "String",
+      "MinLength": "1",
+      "MaxLength": "64",
+      "AllowedPattern": "[a-zA-Z][a-zA-Z0-9]*",
+      "ConstraintDescription": "Must begin with a letter and contain only alphanumeric characters."
+    },
+    "DBAllocatedStorage": {
+      "Default": "5",
+      "Description": "The size of the database (Gb)",
+      "Type": "Number",
+      "MinValue": "5",
+      "MaxValue": "1024",
+      "ConstraintDescription": "must be between 5 and 1024Gb."
+    },
+    "DBInstanceClass": {
+      "Description": "The database instance type",
+      "Type": "String",
+      "Default": "db.t3.micro",
+      "AllowedValues": [
+        "db.t3.micro",
+        "db.t3.small",
+        "db.t3.medium"
+      ],
+      "ConstraintDescription": "must select a valid database instance type."
+    },
+    "MultiAZDatabase": {
+      "Default": "true",
+      "Description": "Create a Multi-AZ MySQL Amazon RDS database instance for high availability",
+      "Type": "String",
+      "AllowedValues": [
+        "true",
+        "false"
+      ],
+      "ConstraintDescription": "Must be either true or false."
+    },
+    "WebServerCapacity": {
+      "Default": "2",
+      "Description": "The initial number of WebServer instances",
+      "Type": "Number",
+      "MinValue": "1",
+      "MaxValue": "5",
+      "ConstraintDescription": "Must be between 1 and 5 EC2 instances."
+    },
+    "IAMEC2InstanceProfile": {
+      "Description": "WebServer EC2 IAM instance profile (with read permission to AWS Secrets Manager). Note role name must start with customer- in AMS environment.",
+      "Type": "String",
+      "Default": "customer-mc-ec2-instance-profile-ssm",
+      "AllowedPattern": "^customer-[a-zA-Z0-9-_]*$|^$",
+      "ConstraintDescription": "A valid pre-existing EC2 IAM role aka instance profile with name starting with customer- ."
+    },
+    "InstanceType": {
+      "Description": "WebServer EC2 instance type",
+      "Type": "String",
+      "Default": "t3.small",
+      "AllowedValues": [
+        "t3.small",
+        "t3.medium",
+        "t3.micro"
+      ],
+      "ConstraintDescription": "must be a valid EC2 instance type."
+    },
+    "InstanceAmiId": {
+      "Description": "WebServer EC2 AMI Id",
+      "Type": "AWS::EC2::Image::Id",
+      "Default": "ami-0d2fa9fa36af62840",
+      "ConstraintDescription": "Must be the AMI Id of an existing AMI in your account. Ensure AMSified AMI is used, either as result of WIGS or have used AMS published AMI as a base."
+    }
+  },
+  "Resources": {
+    "ALBSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "Allow HTTP and HTTPS to client host",
+        "VpcId": {
+          "Ref": "VpcId"
+        },
+        "SecurityGroupIngress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 80,
+            "ToPort": 80,
+            "CidrIp": "0.0.0.0/0"
+          },
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 443,
+            "ToPort": 443,
+            "CidrIp": "0.0.0.0/0"
+          }
+        ],
+        "SecurityGroupEgress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 443,
+            "ToPort": 443,
+            "CidrIp": "{{resolve:ssm:/app/DemoApp/VPCCidr:1}}"
+          }
+        ]
+      }
+    },
+    "ApplicationLoadBalancer": {
+      "Type": "AWS::ElasticLoadBalancingV2::LoadBalancer",
+      "Properties": {
+        "Subnets": [
+          "{{resolve:ssm:/app/DemoApp/PublicSubnet1a:1}}",
+          "{{resolve:ssm:/app/DemoApp/PublicSubnet1c:1}}"
+        ],
+        "SecurityGroups": [
+          {
+            "Ref": "ALBSecurityGroup"
+          }
+        ],
+        "LoadBalancerAttributes": [
+          {
+            "Key": "deletion_protection.enabled",
+            "Value": "true"
+          },
+          {
+            "Key": "idle_timeout.timeout_seconds",
+            "Value": "60"
+          }
+        ]
+      }
+    },
+    "ALBListener": {
+      "Type": "AWS::ElasticLoadBalancingV2::Listener",
+      "Properties": {
+        "DefaultActions": [
+          {
+            "Type": "forward",
+            "TargetGroupArn": {
+              "Ref": "ALBTargetGroup"
+            }
+          }
+        ],
+        "LoadBalancerArn": {
+          "Ref": "ApplicationLoadBalancer"
+        },
+        "Port": 443,
+        "Protocol": "HTTPS",
+        "SslPolicy": "ELBSecurityPolicy-2016-08",
+        "Certificates": [
+          {
+            "CertificateArn": "{{resolve:ssm:/app/DemoApp/CertificateArn:1}}"
+          }
+        ]
+      }
+    },
+    "ALBTargetGroup": {
+      "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
+      "Properties": {
+        "HealthCheckIntervalSeconds": 300,
+        "HealthCheckTimeoutSeconds": 120,
+        "HealthyThresholdCount": 2,
+        "Port": 80,
+        "Protocol": "HTTP",
+        "UnhealthyThresholdCount": 2,
+        "VpcId": {
+          "Ref": "VpcId"
+        },
+        "TargetGroupAttributes": [
+          {
+            "Key": "stickiness.enabled",
+            "Value": "true"
+          },
+          {
+            "Key": "stickiness.type",
+            "Value": "lb_cookie"
+          },
+          {
+            "Key": "stickiness.lb_cookie.duration_seconds",
+            "Value": "30"
+          }
+        ]
+      }
+    },
+    "WebServerGroup": {
+      "Type": "AWS::AutoScaling::AutoScalingGroup",
+      "Properties": {
+        "VPCZoneIdentifier": [
+          "{{resolve:ssm:/app/DemoApp/PrivateSubnet1a:1}}",
+          "{{resolve:ssm:/app/DemoApp/PrivateSubnet1c:1}}"
+        ],
+        "LaunchConfigurationName": {
+          "Ref": "LaunchConfig"
+        },
+        "MinSize": "1",
+        "MaxSize": "5",
+        "DesiredCapacity": {
+          "Ref": "WebServerCapacity"
+        },
+        "TargetGroupARNs": [
+          {
+            "Ref": "ALBTargetGroup"
+          }
+        ],
+        "HealthCheckType": "ELB",
+        "HealthCheckGracePeriod": 300,
+        "MetricsCollection": [
+          {
+            "Granularity": "1Minute",
+            "Metrics": [
+              "GroupMinSize",
+              "GroupMaxSize",
+              "GroupDesiredCapacity",
+              "GroupInServiceInstances",
+              "GroupPendingInstances",
+              "GroupStandbyInstances",
+              "GroupTerminatingInstances",
+              "GroupTotalInstances"
+            ]
+          }
+        ]
+      },
+      "CreationPolicy": {
+        "ResourceSignal": {
+          "Timeout": "PT15M",
+          "Count": {
+            "Ref": "WebServerCapacity"
+          }
+        }
+      },
+      "UpdatePolicy": {
+        "AutoScalingRollingUpdate": {
+          "MinInstancesInService": 1,
+          "MaxBatchSize": 1,
+          "PauseTime": "PT15M",
+          "WaitOnResourceSignals": true
+        }
+      }
+    },
+    "LaunchConfig": {
+      "Type": "AWS::AutoScaling::LaunchConfiguration",
+      "Metadata": {
+        "AWS::CloudFormation::Init": {
+          "config": {
+            "packages": {
+              "yum": {
+                "httpd": [],
+                "php": [],
+                "php-mysql": [],
+                "jq": []
+              }
+            },
+            "files": {
+              "/var/www/html/index.php": {
+                "content": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "<html>\n",
+                      "  <head>\n",
+                      "    <title>AWS CloudFormation PHP Sample</title>\n",
+                      "    <meta http-equiv=\"Content-Type\" content=\"text/html; charset=ISO-8859-1\">\n",
+                      "  </head>\n",
+                      "  <body>\n",
+                      "    <h1>Welcome to the AWS CloudFormation PHP Sample</h1>\n",
+                      "    <p/>\n",
+                      "    <?php\n",
+                      "      print \"The Current Date and Time is: <br/>\";\n",
+                      "      print date(\"g:i A l, F j Y.\");\n",
+                      "    ?>\n",
+                      "  </body>\n",
+                      "</html>\n"
+                    ]
+                  ]
+                },
+                "mode": "000644",
+                "owner": "apache",
+                "group": "apache"
+              }
+            },
+            "services": {
+              "sysvinit": {
+                "httpd": {
+                  "enabled": "true",
+                  "ensureRunning": "true",
+                  "packages": {
+                    "yum": [
+                      "httpd"
+                    ]
+                  },
+                  "files": [
+                    "/var/www/html/index.php"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "Properties": {
+        "ImageId": {
+          "Ref": "InstanceAmiId"
+        },
+        "InstanceType": {
+          "Ref": "InstanceType"
+        },
+        "IamInstanceProfile": {
+          "Ref": "IAMEC2InstanceProfile"
+        },
+        "SecurityGroups": [
+          {
+            "Ref": "WebServerSecurityGroup"
+          }
+        ],
+        "KeyName": "{{resolve:ssm:/app/DemoApp/KeyName:1}}",
+        "UserData": {
+          "Fn::Base64": {
+            "Fn::Join": [
+              "",
+              [
+                "#!/bin/bash -xe\n",
+                "yum update -y aws-cfn-bootstrap\n",
+                "/opt/aws/bin/cfn-init -v ",
+                "         --stack ",
+                {
+                  "Ref": "AWS::StackName"
+                },
+                "         --resource LaunchConfig ",
+                "         --configsets Install ",
+                "         --region ",
+                {
+                  "Ref": "AWS::Region"
+                },
+                "\n"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    "WebServerSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "Enable SSH access and HTTP/HTTPS traffic to the web server instances",
+        "VpcId": {
+          "Ref": "VpcId"
+        },
+        "SecurityGroupIngress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 80,
+            "ToPort": 80,
+            "CidrIp": "0.0.0.0/0"
+          },
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 443,
+            "ToPort": 443,
+            "CidrIp": "0.0.0.0/0"
+          },
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 22,
+            "ToPort": 22,
+            "CidrIp": "0.0.0.0/0"
+          }
+        ]
+      }
+    },
+    "MyDB": {
+      "Type": "AWS::RDS::DBInstance",
+      "Properties": {
+        "DBName": {
+          "Ref": "DBName"
+        },
+        "AllocatedStorage": {
+          "Ref": "DBAllocatedStorage"
+        },
+        "DBInstanceClass": {
+          "Ref": "DBInstanceClass"
+        },
+        "Engine": "mysql",
+        "MasterUsername": "{{resolve:secretsmanager:/app/DemoApp/DBUser:SecretString:username}}",
+        "MasterUserPassword": "{{resolve:secretsmanager:/app/DemoApp/DBUser:SecretString:password}}",
+        "VPCSecurityGroups": [
+          {
+            "Ref": "DBSecurityGroup"
+          }
+        ],
+        "StorageEncrypted": true,
+        "BackupRetentionPeriod": 7,
+        "MultiAZ": {
+          "Ref": "MultiAZDatabase"
+        },
+        "PubliclyAccessible": false,
+        "DBParameterGroupName": "default.mysql5.7",
+        "DeletionPolicy": "Snapshot",
+        "AutoMinorVersionUpgrade": true,
+        "EnablePerformanceInsights": true,
+        "PerformanceInsightsRetentionPeriod": 7,
+        "PerformanceInsightsKMSKeyId": "{{resolve:ssm:/app/DemoApp/PerformanceInsightsKmsKeyId:1}}",
+        "MonitoringInterval": 60,
+        "MonitoringRoleArn": "{{resolve:ssm:/app/DemoApp/MonitoringRoleArn:1}}",
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "Production"
+          },
+          {
+            "Key": "Owner",
+            "Value": "TeamA"
+          }
+        ]
+      }
+    },
+    "DBSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "Database security group",
+        "VpcId": {
+          "Ref": "VpcId"
+        },
+        "SecurityGroupIngress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 3306,
+            "ToPort": 3306,
+            "SourceSecurityGroupId": {
+              "Ref": "WebServerSecurityGroup"
+            }
+          }
+        ],
+        "SecurityGroupEgress": [
+          {
+            "IpProtocol": "-1",
+            "CidrIp": "0.0.0.0/0",
+            "FromPort": 0,
+            "ToPort": 0
+          }
+        ]
+      }
+    },
+    "DBSubnetGroup": {
+      "Type": "AWS::RDS::DBSubnetGroup",
+      "Properties": {
+        "DBSubnetGroupDescription": "Subnets available for the RDS DB Instance",
+        "SubnetIds": [
+          "{{resolve:ssm:/app/DemoApp/PrivateSubnet1a:1}}",
+          "{{resolve:ssm:/app/DemoApp/PrivateSubnet1c:1}}"
+        ]
+      }
+    },
+    "CloudWatchAlarmCPUUtilization": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmName": "HighCPUUtilization",
+        "AlarmDescription": "Alarm if CPU utilization exceeds 80%",
+        "Namespace": "AWS/EC2",
+        "MetricName": "CPUUtilization",
+        "Dimensions": [
+          {
+            "Name": "AutoScalingGroupName",
+            "Value": {
+              "Ref": "WebServerGroup"
+            }
+          }
+        ],
+        "Statistic": "Average",
+        "Period": "300",
+        "EvaluationPeriods": "2",
+        "Threshold": "80",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "AlarmActions": [
+          "arn:aws:sns:us-east-1:123456789012:SendMeAnEmail"
+        ],
+        "OKActions": [
+          "arn:aws:sns:us-east-1:123456789012:SendMeAnEmail"
+        ],
+        "InsufficientDataActions": [
+          "arn:aws:sns:us-east-1:123456789012:SendMeAnEmail"
+        ]
+      }
+    },
+    "BillingAlarm": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmName": "MonthlyBillingAlarm",
+        "AlarmDescription": "Alarm when the monthly bill exceeds a certain threshold",
+        "Namespace": "AWS/Billing",
+        "MetricName": "EstimatedCharges",
+        "Dimensions": [
+          {
+            "Name": "Currency",
+            "Value": "USD"
+          }
+        ],
+        "Statistic": "Maximum",
+        "Period": "21600", 
+        "EvaluationPeriods": "1",
+        "Threshold": "100", 
+        "ComparisonOperator": "GreaterThanThreshold",
+        "AlarmActions": [
+          "arn:aws:sns:us-east-1:123456789012:NotifyMe"
+        ]
+      }
+    },
+    "BackupPlan": {
+      "Type": "AWS::Backup::BackupPlan",
+      "Properties": {
+        "BackupPlan": {
+          "BackupPlanName": "WebServerBackupPlan",
+          "Rules": [
+            {
+              "RuleName": "DailyBackup",
+              "TargetBackupVault": "Default",
+              "ScheduleExpression": "cron(0 12 * * ? *)",
+              "StartWindowMinutes": 60,
+              "CompletionWindowMinutes": 180,
+              "Lifecycle": {
+                "DeleteAfterDays": 30
+              },
+              "RecoveryPointTags": {
+                "CreatedBy": "CloudFormation"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "CostReportsS3Bucket": {
+      "Type": "AWS::S3::Bucket",
+      "Properties": {
+        "BucketName": "cost-reports-bucket",
+        "VersioningConfiguration": {
+          "Status": "Enabled"
+        }
+      }
+    },
+    "ServiceQuotaAlarm": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmName": "ServiceQuotaThreshold",
+        "AlarmDescription": "Alarm if service quota usage exceeds 80%",
+        "Namespace": "AWS/Usage",
+        "MetricName": "ServiceQuotaUsage",
+        "Dimensions": [
+          {
+            "Name": "Resource",
+            "Value": "EC2Instances"
+          }
+        ],
+        "Statistic": "Maximum",
+        "Period": "86400",
+        "EvaluationPeriods": "1",
+        "Threshold": "80",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "AlarmActions": [
+          "arn:aws:sns:us-east-1:123456789012:SendMeAnEmail"
+        ],
+        "OKActions": [
+          "arn:aws:sns:us-east-1:123456789012:SendMeAnEmail"
+        ]
+      }
+    }
+  },
+  "Outputs": {
+    "WebsiteURL": {
+      "Description": "The URL of the website",
+      "Value": {
+        "Fn::GetAtt": [
+          "ApplicationLoadBalancer",
+          "DNSName"
+        ]
+      }
+    },
+    "DBInstanceEndpoint": {
+      "Description": "The endpoint address of the database",
+      "Value": {
+        "Fn::GetAtt": [
+          "MyDB",
+          "Endpoint.Address"
+        ]
+      }
+    },
+    "CloudWatchAlarmName": {
+      "Description": "Name of the CloudWatch Alarm",
+      "Value": {
+        "Ref": "CloudWatchAlarmCPUUtilization"
+      }
+    },
+    "BillingAlarmName": {
+      "Description": "Name of the Billing Alarm",
+      "Value": {
+        "Ref": "BillingAlarm"
+      }
+    },
+    "BackupPlanId": {
+      "Description": "ID of the Backup Plan",
+      "Value": {
+        "Ref": "BackupPlan"
+      }
+    },
+    "CostReportsBucketName": {
+      "Description": "Name of the S3 bucket for cost reports",
+      "Value": {
+        "Ref": "CostReportsS3Bucket"
+      }
+    }
+  }
+}
