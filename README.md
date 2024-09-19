@@ -1,7 +1,7 @@
 
 This solution takes a workload written in Infrastructure as Code (IaC), e.g., AWS CloudFormation, and calls **Amazon Bedrock** to analyze it, detect what AWS best practices are used (by comparing with best practices from the AWS Well-Architected Framework), and generate a list of the best practices used in this workload. It then interacts programmatically using the AWS Well-Architected Tool to create a **Well-Architected Review milestone**. This process takes **a minute or two** to complete **versus the manual process that traditionally takes several hours**.
 
-Check a [walkthrough and a demo here](link).
+Check a [walkthrough and a demo here](https://community.aws/content/2hYteYyGPff8nuzG3ye8HZQOtCf/how-i-cut-the-time-to-complete-a-well-architected-review-from-hours-to-minutes).
 
 You can test this application in two ways:
 
