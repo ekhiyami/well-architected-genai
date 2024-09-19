@@ -570,7 +570,7 @@ def main():
 
   
 
-    uploaded_file = st.file_uploader("I will analyze your workload for AWS best practices and complete a Well-Architected Review in seconds", type=["yaml", "json", "yml"])
+    uploaded_file = st.file_uploader("Upload your IaC workload (e.g. AWS CloudFormation). I will analyze it for AWS best practices and complete a Well-Architected Review", type=["yaml", "json", "yml"])
     
     if uploaded_file is not None:
         s3_url = upload_file_to_s3(uploaded_file, s3_bucket)
